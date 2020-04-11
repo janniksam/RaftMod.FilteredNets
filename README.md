@@ -6,7 +6,7 @@ FilteredNets is a Raft-Mod, which allows you to configure your item nets to only
  
 Use the Rotate-Key (default is R) on an item net to select a specific filter mode.
 
-Supported filter modes:
+**Supported filter modes:**
 
 - Default: Every item will be caught by the item net.
 - Planks: Planks and floating barrels will be caught by the item net.
