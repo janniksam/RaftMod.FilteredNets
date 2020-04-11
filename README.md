@@ -2,6 +2,8 @@
 
 FilteredNets is a Raft-Mod, which allows you to configure your item nets to only catch specific items
 
+https://www.raftmodding.com/mods/filterednets
+
 ## Features:
  
 Use the Rotate-Key (default is R) on an item net to select a specific filter mode.
