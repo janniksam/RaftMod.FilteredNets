@@ -43,7 +43,7 @@ public class FilteredNets : Mod
         harmony.UnpatchAll(harmonyID);
         Destroy(gameObject);
     }
-    
+
     public void Update()
     {
         MessageHandler.ReadP2P_Channel();
@@ -85,9 +85,14 @@ public class FilteredNets : Mod
     public override void WorldEvent_WorldLoaded()
     {
         base.WorldEvent_WorldLoaded();
+        m_netSetup.Clear();
 
         if (!Semih_Network.IsHost)
         {
+            // Requesting current filters from host
+            MessageHandler.SendMessage(
+                new Message_SyncNetFiltersRequest(
+                    (Messages)MessageHandler.NetworkMessages.FilteredNets_SyncNetFiltersRequested));
             return;
         }
 
@@ -108,8 +113,12 @@ public class FilteredNets : Mod
 
     private void LoadNetFilterMapping()
     {
-        m_netSetup.Clear();
         var mappings = ReadConfigurationFile();
+        ApplyFilters(mappings);
+    }
+
+    private static void ApplyFilters(NetFilterMappings mappings)
+    {
         if (mappings == null ||
             mappings.Mappings == null)
         {
@@ -121,9 +130,26 @@ public class FilteredNets : Mod
         {
             if (itemNets.Contains(mapping.NetId))
             {
-                m_netSetup.Add(mapping.NetId, mapping.ActiveNetFilter);
+                if (m_netSetup.ContainsKey(mapping.NetId))
+                {
+                    m_netSetup[mapping.NetId] = mapping.ActiveNetFilter;
+                }
+                else
+                {
+                    m_netSetup.Add(mapping.NetId, mapping.ActiveNetFilter);
+                }
             }
         }
+    }
+
+    private static void SyncFiltersWithPlayers()
+    {
+        RConsole.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", m_modNamePrefix));
+        
+        NetFilterMappings mappings = GetCurrentFilterMapping();
+        MessageHandler.SendMessage(
+             new Message_SyncNetFilters(
+                (Messages)MessageHandler.NetworkMessages.FilteredNets_SyncNetFilters, mappings));
     }
 
     private NetFilterMappings ReadConfigurationFile()
@@ -166,13 +192,8 @@ public class FilteredNets : Mod
             Directory.CreateDirectory(currentConfigurationFileDirectory);
         }
 
-        var netfilterMapping = new NetFilterMappings(
-            m_netSetup.Select(p => new NetFilterMapping
-            {
-                NetId = p.Key,
-                ActiveNetFilter = p.Value
-            }).ToArray());
-
+        NetFilterMappings netfilterMapping = GetCurrentFilterMapping();
+        
         var writer = new XmlSerializer(typeof(NetFilterMappings));
         using (FileStream file = File.OpenWrite(currentConfigurationFilePath))
         {
@@ -180,6 +201,16 @@ public class FilteredNets : Mod
             file.Flush();
             file.Close();
         }
+    }
+
+    private static NetFilterMappings GetCurrentFilterMapping()
+    {
+        return new NetFilterMappings(
+                    m_netSetup.Select(p => new NetFilterMapping
+                    {
+                        NetId = p.Key,
+                        ActiveNetFilter = p.Value
+                    }).ToArray());
     }
 
     private string GetConfigurationFilePath()
@@ -233,6 +264,7 @@ public class FilteredNets : Mod
     }
 
     #region Persisting Net Configuration
+    [Serializable]
     public class NetFilterMappings
     {
         public NetFilterMappings()
@@ -247,6 +279,7 @@ public class FilteredNets : Mod
         public NetFilterMapping[] Mappings { get; set; }
     }
 
+    [Serializable]
     public class NetFilterMapping
     {
         public uint NetId { get; set; }
@@ -369,7 +402,9 @@ public class FilteredNets : Mod
 
         public enum NetworkMessages
         {
-            FilteredNets_FilterChanged = 10910
+            FilteredNets_FilterChanged = 10910,
+            FilteredNets_SyncNetFilters = 10911,
+            FilteredNets_SyncNetFiltersRequested = 10912
         }
 
         public static void SendMessage(Message message)
@@ -395,7 +430,6 @@ public class FilteredNets : Mod
             while (SteamNetworking.IsP2PPacketAvailable(out num, m_networkChannelFilteredNets))
             {
                 byte[] array = new byte[num];
-                
                 uint num2;
                 CSteamID cSteamID;
                 if (!SteamNetworking.ReadP2PPacket(array, num, out num2, out cSteamID, m_networkChannelFilteredNets))
@@ -423,6 +457,27 @@ public class FilteredNets : Mod
                                 }
 
                                 SetNetFilter(filterMessage.ObjectIndex, filterMessage.NewFilter);
+                                break;
+                            }
+                        case (Messages)NetworkMessages.FilteredNets_SyncNetFilters:
+                            {
+                                var syncMessage = message as Message_SyncNetFilters;
+                                if (syncMessage == null)
+                                {
+                                    break;
+                                }
+
+                                ApplyFilters(syncMessage.Mappings);
+                                
+                                RConsole.Log(string.Format("{0}: Synced the item net filters with host...", m_modNamePrefix));
+                                break;
+                            }
+                        case (Messages)NetworkMessages.FilteredNets_SyncNetFiltersRequested:
+                            {
+                                if (Semih_Network.IsHost)
+                                {
+                                    SyncFiltersWithPlayers();
+                                }
                                 break;
                             }
                     }
@@ -473,10 +528,44 @@ public class FilteredNets : Mod
         public uint ObjectIndex;
         public string NewFilter;
 
-        public Message_ItemNetFilterChanged(Messages type, uint objectIndex, string newFilter) : base(type)
+        public Message_ItemNetFilterChanged()
+        {
+        }
+
+        public Message_ItemNetFilterChanged(Messages type, uint objectIndex, string newFilter) 
+            : base(type)
         {
             ObjectIndex = objectIndex;
             NewFilter = newFilter;
+        }
+    }
+
+    [Serializable]
+    public class Message_SyncNetFilters : Message
+    {
+        public NetFilterMappings Mappings;
+
+        public Message_SyncNetFilters()
+        {
+        }
+
+        public Message_SyncNetFilters(Messages type, NetFilterMappings mappings)
+            : base(type)
+        {
+            Mappings = mappings;
+        }
+    }
+    
+    [Serializable]
+    public class Message_SyncNetFiltersRequest : Message
+    {
+        public Message_SyncNetFiltersRequest()
+        {
+        }
+
+        public Message_SyncNetFiltersRequest(Messages type)
+            : base(type)
+        {
         }
     }
 
