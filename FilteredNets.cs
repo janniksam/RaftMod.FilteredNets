@@ -16,7 +16,7 @@ using UnityEngine;
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
-[ModVersion("1.0")]
+[ModVersion("1.1")]
 [RaftVersion("Update 11 (4677160)")]
 [ModIsPermanent(true)]
 public class FilteredNets : Mod

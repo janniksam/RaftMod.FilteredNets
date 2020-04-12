@@ -19,4 +19,7 @@ Use the Rotate-Key (default is R) on an item net to select a specific filter mod
 ## Under development
 
 This mod currently under development. 
-It is currently only working locally. It will not work in a multiplayer game.
+
+## Changes
+
+- Multiplayer Support
