@@ -1,21 +1,24 @@
 using Harmony;
+using Steamworks;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Xml.Serialization;
 using UnityEngine;
 
 [ModTitle("FilteredNets")]
 [ModDescription("Configure your item nets to only catch specific items")]
-[ModAuthor("janniksam")] 
+[ModAuthor("janniksam")]
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
-[ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")] 
-[ModVersion("1.0")] 
-[RaftVersion("Update 11 (4677160)")] 
-[ModIsPermanent(true)] 
+[ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
+[ModVersion("1.0")]
+[RaftVersion("Update 11 (4677160)")]
+[ModIsPermanent(true)]
 public class FilteredNets : Mod
 {
     private static readonly string m_modNamePrefix = "<color=#42a7f5>Filtered</color><color=#FF0000>Nets</color>";
@@ -36,14 +39,15 @@ public class FilteredNets : Mod
     public void OnModUnload()
     {
         RConsole.Log(string.Format("{0} has been unloaded!", m_modNamePrefix));
-        
+
         harmony.UnpatchAll(harmonyID);
         Destroy(gameObject);
     }
-
-    //public void Update()
-    //{
-    //}
+    
+    public void Update()
+    {
+        MessageHandler.ReadP2P_Channel();
+    }
 
     private static void ToggleFilterModeForNet(ItemNet net)
     {
@@ -55,10 +59,18 @@ public class FilteredNets : Mod
 
         string currentFilterMode = m_netSetup[netId];
         string nextFilterMode = NetFilters.Next(currentFilterMode);
+        SetNetFilter(netId, nextFilterMode);
+        MessageHandler.SendMessage(
+            new Message_ItemNetFilterChanged(
+                (Messages)MessageHandler.NetworkMessages.FilteredNets_FilterChanged, netId, nextFilterMode));
+    }
+
+    private static void SetNetFilter(uint netId, string nextFilterMode)
+    {
         m_netSetup[netId] = nextFilterMode;
         RConsole.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", m_modNamePrefix, netId, nextFilterMode));
     }
-    
+
     private static string GetCurrentFilter(ItemNet net)
     {
         var netId = net.itemCollector.ObjectIndex;
@@ -73,8 +85,8 @@ public class FilteredNets : Mod
     public override void WorldEvent_WorldLoaded()
     {
         base.WorldEvent_WorldLoaded();
-        
-        if(!Semih_Network.IsHost)
+
+        if (!Semih_Network.IsHost)
         {
             return;
         }
@@ -98,16 +110,16 @@ public class FilteredNets : Mod
     {
         m_netSetup.Clear();
         var mappings = ReadConfigurationFile();
-        if (mappings == null || 
+        if (mappings == null ||
             mappings.Mappings == null)
         {
             return;
         }
 
         uint[] itemNets = FindObjectsOfType<ItemNet>().Select(p => p.itemCollector.ObjectIndex).ToArray();
-        foreach(var mapping in mappings.Mappings)
+        foreach (var mapping in mappings.Mappings)
         {
-            if(itemNets.Contains(mapping.NetId))
+            if (itemNets.Contains(mapping.NetId))
             {
                 m_netSetup.Add(mapping.NetId, mapping.ActiveNetFilter);
             }
@@ -183,7 +195,7 @@ public class FilteredNets : Mod
         }
 
         var filter = m_netSetup[netId];
-        if(filter == NetFilters.All)
+        if (filter == NetFilters.All)
         {
             return false;
         }
@@ -199,7 +211,7 @@ public class FilteredNets : Mod
 
     private static string GetItemName(PickupItem_Networked item)
     {
-        if(item.PickupItem.dropper != null)
+        if (item.PickupItem.dropper != null)
         {
             return NetFilters.Barrels;
         }
@@ -255,7 +267,7 @@ public class FilteredNets : Mod
         {
             if (!___collectorCollider.enabled ||
                 ___maxNumberOfItems != 0 &&
-                __instance.collectedItems.Count >= ___maxNumberOfItems || 
+                __instance.collectedItems.Count >= ___maxNumberOfItems ||
                 !Helper.ObjectIsOnLayer(other.transform.gameObject, __instance.collectMask))
             {
                 //Skip collection
@@ -323,11 +335,11 @@ public class FilteredNets : Mod
 
     private class NetFilters
     {
-        public static string All = "Default";
-        private static string Planks = "Plank";
-        private static string Plastic = "Plastic";
-        private static string Thatches = "Thatch";
-        public static string Barrels = "Barrels";
+        public const string All = "Default";
+        private const string Planks = "Plank";
+        private const string Plastic = "Plastic";
+        private const string Thatches = "Thatch";
+        public const string Barrels = "Barrels";
 
         private static string[] AllFilters = new string[]
         {
@@ -349,4 +361,133 @@ public class FilteredNets : Mod
             return AllFilters[nextIndex];
         }
     }
+
+    #region Networking
+    public class MessageHandler : MonoBehaviour
+    {
+        private const int m_networkChannelFilteredNets = 72;
+
+        public enum NetworkMessages
+        {
+            FilteredNets_FilterChanged = 10910
+        }
+
+        public static void SendMessage(Message message)
+        {
+            if (Semih_Network.IsHost)
+            {
+                RAPI.GetLocalPlayer().Network.RPC(message, Target.Other, EP2PSend.k_EP2PSendReliable, (NetworkChannel)m_networkChannelFilteredNets);
+            }
+            else
+            {
+                RAPI.GetLocalPlayer().SendP2P(message, EP2PSend.k_EP2PSendReliable, (NetworkChannel)m_networkChannelFilteredNets);
+            }
+        }
+
+        public static void ReadP2P_Channel()
+        {
+            if (Semih_Network.InLobbyScene) 
+            {
+                return; 
+            }
+
+            uint num;
+            while (SteamNetworking.IsP2PPacketAvailable(out num, m_networkChannelFilteredNets))
+            {
+                byte[] array = new byte[num];
+                
+                uint num2;
+                CSteamID cSteamID;
+                if (!SteamNetworking.ReadP2PPacket(array, num, out num2, out cSteamID, m_networkChannelFilteredNets))
+                {
+                    continue;
+                }
+
+                var messages = DeserializeMessages(array);
+                foreach(var message in messages)
+                {
+                    if (message == null)
+                    {
+                        continue;
+                    }
+
+                    Messages type = message.Type;
+                    switch (type)
+                    {
+                        case (Messages)NetworkMessages.FilteredNets_FilterChanged:
+                            {
+                                var filterMessage = message as Message_ItemNetFilterChanged;
+                                if (filterMessage == null)
+                                {
+                                    break;
+                                }
+
+                                SetNetFilter(filterMessage.ObjectIndex, filterMessage.NewFilter);
+                                break;
+                            }
+                    }
+                }
+            }
+        }
+
+        private static Message[] DeserializeMessages(byte[] array)
+        {
+            Packet packet;
+            using (var ms = new MemoryStream(array))
+            {
+                var bf = new BinaryFormatter
+                {
+                    Binder = new PreMergeToMergedDeserializationBinder()
+                };
+
+                packet = bf.Deserialize(ms) as Packet;
+            }
+            
+            if(packet == null)
+            {
+                return new Message[0];
+            }
+
+            if (packet.PacketType == PacketType.Single)
+            {
+                var packet_Single = packet as Packet_Single;
+                return new Message[]
+                {
+                    packet_Single.message
+                };
+            }
+            
+            var multiplepackages = packet as Packet_Multiple;
+            if(multiplepackages == null)
+            {
+                return new Message[0];
+            }
+
+            return multiplepackages.messages;
+        }
+    }
+
+    [Serializable]
+    public class Message_ItemNetFilterChanged : Message
+    {
+        public uint ObjectIndex;
+        public string NewFilter;
+
+        public Message_ItemNetFilterChanged(Messages type, uint objectIndex, string newFilter) : base(type)
+        {
+            ObjectIndex = objectIndex;
+            NewFilter = newFilter;
+        }
+    }
+
+    private sealed class PreMergeToMergedDeserializationBinder : SerializationBinder
+    {
+        public override Type BindToType(string assemblyName, string typeName)
+        {
+            string exeAssembly = Assembly.GetExecutingAssembly().FullName;
+            Type typeToDeserialize = Type.GetType(string.Format("{0}, {1}", typeName, exeAssembly));
+            return typeToDeserialize;
+        }
+    }
+    #endregion
 }
