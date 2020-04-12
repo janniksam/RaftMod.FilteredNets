@@ -1,6 +1,6 @@
 # RaftMod.FilteredNets
 
-FilteredNets is a Raft-Mod, which allows you to configure your item nets to only catch specific items
+FilteredNets is a Raft-Mod, that allows you to configure your item nets to only catch specific items
 
 https://www.raftmodding.com/mods/filterednets
 
