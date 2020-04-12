@@ -8,7 +8,10 @@ using System.Reflection;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Xml.Serialization;
+using JetBrains.Annotations;
 using UnityEngine;
+
+// ReSharper disable once CheckNamespace
 
 [ModTitle("FilteredNets")]
 [ModDescription("Configure your item nets to only catch specific items")]
@@ -21,29 +24,33 @@ using UnityEngine;
 [ModIsPermanent(true)]
 public class FilteredNets : Mod
 {
-    private static readonly string m_modNamePrefix = "<color=#42a7f5>Filtered</color><color=#FF0000>Nets</color>";
-    private static readonly string m_configurationPath = Path.Combine(Directory.GetCurrentDirectory(), @"mods\ModData\FilteredNets\");
-    private static readonly string m_configurationFile = "netfilterMapping.xml";
-    private static Dictionary<uint, string> m_netSetup = new Dictionary<uint, string>();
+    private const string HarmonyId = "com.janniksam.raftmods.filterednets";
+    private const string ModNamePrefix = "<color=#42a7f5>Filtered</color><color=#FF0000>Nets</color>";
+    private const string ConfigurationSubPath = @"mods\ModData\FilteredNets\";
+    private const string ConfigurationFile = "netfilterMapping.xml";
 
-    public HarmonyInstance harmony;
-    public readonly string harmonyID = "com.janniksam.raftmods.filterednets";
+    private readonly string m_configurationPath = Path.Combine(Directory.GetCurrentDirectory(), ConfigurationSubPath);
+    private static readonly Dictionary<uint, string> m_netSetup = new Dictionary<uint, string>();
+    private HarmonyInstance m_harmony;
 
+    [UsedImplicitly]
     public void Start()
     {
-        RConsole.Log(string.Format("{0} has been loaded!", m_modNamePrefix));
-        harmony = HarmonyInstance.Create(harmonyID);
-        harmony.PatchAll(Assembly.GetExecutingAssembly());
+        RConsole.Log(string.Format("{0} has been loaded!", ModNamePrefix));
+        m_harmony = HarmonyInstance.Create(HarmonyId);
+        m_harmony.PatchAll(Assembly.GetExecutingAssembly());
     }
 
+    [UsedImplicitly]
     public void OnModUnload()
     {
-        RConsole.Log(string.Format("{0} has been unloaded!", m_modNamePrefix));
+        RConsole.Log(string.Format("{0} has been unloaded!", ModNamePrefix));
 
-        harmony.UnpatchAll(harmonyID);
+        m_harmony.UnpatchAll(HarmonyId);
         Destroy(gameObject);
     }
 
+    [UsedImplicitly]
     public void Update()
     {
         MessageHandler.ReadP2P_Channel();
@@ -61,14 +68,14 @@ public class FilteredNets : Mod
         string nextFilterMode = NetFilters.Next(currentFilterMode);
         SetNetFilter(netId, nextFilterMode);
         MessageHandler.SendMessage(
-            new Message_ItemNetFilterChanged(
-                (Messages)MessageHandler.NetworkMessages.FilteredNets_FilterChanged, netId, nextFilterMode));
+            new MessageItemNetFilterChanged(
+                (Messages)MessageHandler.FilteredNetsMessages.FilterChanged, netId, nextFilterMode));
     }
 
     private static void SetNetFilter(uint netId, string nextFilterMode)
     {
         m_netSetup[netId] = nextFilterMode;
-        RConsole.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", m_modNamePrefix, netId, nextFilterMode));
+        RConsole.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", ModNamePrefix, netId, nextFilterMode));
     }
 
     private static string GetCurrentFilter(ItemNet net)
@@ -91,8 +98,8 @@ public class FilteredNets : Mod
         {
             // Requesting current filters from host
             MessageHandler.SendMessage(
-                new Message_SyncNetFiltersRequest(
-                    (Messages)MessageHandler.NetworkMessages.FilteredNets_SyncNetFiltersRequested));
+                new MessageSyncNetFiltersRequest(
+                    (Messages)MessageHandler.FilteredNetsMessages.SyncNetFiltersRequested));
             return;
         }
 
@@ -144,12 +151,12 @@ public class FilteredNets : Mod
 
     private static void SyncFiltersWithPlayers()
     {
-        RConsole.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", m_modNamePrefix));
+        RConsole.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", ModNamePrefix));
         
-        NetFilterMappings mappings = GetCurrentFilterMapping();
+        var mappings = GetCurrentFilterMapping();
         MessageHandler.SendMessage(
-             new Message_SyncNetFilters(
-                (Messages)MessageHandler.NetworkMessages.FilteredNets_SyncNetFilters, mappings));
+             new MessageSyncNetFilters(
+                (Messages)MessageHandler.FilteredNetsMessages.SyncNetFilters, mappings));
     }
 
     private NetFilterMappings ReadConfigurationFile()
@@ -178,7 +185,7 @@ public class FilteredNets : Mod
         }
         catch (IOException ex)
         {
-            RConsole.LogWarning(string.Format("{0}: Cannot read the current configuration. Exception: {1}", m_modNamePrefix, ex));
+            RConsole.LogWarning(string.Format("{0}: Cannot read the current configuration. Exception: {1}", ModNamePrefix, ex));
             return null;
         }
     }
@@ -187,15 +194,20 @@ public class FilteredNets : Mod
     {
         var currentConfigurationFilePath = GetConfigurationFilePath();
         var currentConfigurationFileDirectory = Path.GetDirectoryName(currentConfigurationFilePath);
+        if (currentConfigurationFileDirectory == null)
+        {
+            RConsole.LogError(string.Format("{0}: Cannot determine save-path.", ModNamePrefix));
+            return;
+        }
+
         if (!Directory.Exists(currentConfigurationFileDirectory))
         {
             Directory.CreateDirectory(currentConfigurationFileDirectory);
         }
 
-        NetFilterMappings netfilterMapping = GetCurrentFilterMapping();
-        
+        var netfilterMapping = GetCurrentFilterMapping();
         var writer = new XmlSerializer(typeof(NetFilterMappings));
-        using (FileStream file = File.OpenWrite(currentConfigurationFilePath))
+        using (var file = File.OpenWrite(currentConfigurationFilePath))
         {
             writer.Serialize(file, netfilterMapping);
             file.Flush();
@@ -215,7 +227,7 @@ public class FilteredNets : Mod
 
     private string GetConfigurationFilePath()
     {
-        return Path.Combine(m_configurationPath, SaveAndLoad.CurrentGameFileName, m_configurationFile);
+        return Path.Combine(m_configurationPath, SaveAndLoad.CurrentGameFileName, ConfigurationFile);
     }
 
     private static bool ShouldBeFilteredOut(PickupItem_Networked item, uint netId)
@@ -289,14 +301,21 @@ public class FilteredNets : Mod
     #endregion
 
     #region Harmony Patches
+
     [HarmonyPatch(typeof(ItemCollector)), HarmonyPatch("OnTriggerEnter")]
+    [UsedImplicitly]
     public class ItemCollectorEditPatch
     {
+        [UsedImplicitly]
         private static bool Prefix(
+            // ReSharper disable InconsistentNaming
+            // ReSharper disable SuggestBaseTypeForParameter
             ItemCollector __instance,
             Collider other,
             int ___maxNumberOfItems,
             Collider ___collectorCollider)
+            // ReSharper restore SuggestBaseTypeForParameter
+            // ReSharper restore InconsistentNaming
         {
             if (!___collectorCollider.enabled ||
                 ___maxNumberOfItems != 0 &&
@@ -308,7 +327,7 @@ public class FilteredNets : Mod
             }
 
             var itemNet = __instance.GetComponentInParent<ItemNet>();
-            PickupItem_Networked item = other.transform.GetComponentInParent<PickupItem_Networked>();
+            var item = other.transform.GetComponentInParent<PickupItem_Networked>();
             if (ShouldBeFilteredOut(item, itemNet.itemCollector.ObjectIndex))
             {
                 //Skip collection
@@ -321,12 +340,17 @@ public class FilteredNets : Mod
     }
 
     [HarmonyPatch(typeof(ItemNet)), HarmonyPatch("OnIsRayed")]
+    [UsedImplicitly]
     public class ItemNetEditPatch
     {
-        private static bool Prefix(
+        [UsedImplicitly]
+        private static bool Prefix
+        (
+            // ReSharper disable InconsistentNaming
             ItemNet __instance,
             CanvasHelper ___canvas,
             ref bool ___displayText)
+            // ReSharper restore InconsistentNaming
         {
             // This overrides the original logic. 
             // If the internal logic is changed in the future, this has to change aswell.
@@ -364,9 +388,10 @@ public class FilteredNets : Mod
             return false;
         }
     }
+
     #endregion
 
-    private class NetFilters
+    private static class NetFilters
     {
         public const string All = "Default";
         private const string Planks = "Plank";
@@ -374,7 +399,7 @@ public class FilteredNets : Mod
         private const string Thatches = "Thatch";
         public const string Barrels = "Barrels";
 
-        private static string[] AllFilters = new string[]
+        private static readonly string[] m_allFilters =
         {
             All,
             Planks,
@@ -385,37 +410,38 @@ public class FilteredNets : Mod
 
         internal static string Next(string currentFilterMode)
         {
-            int nextIndex = Array.IndexOf(AllFilters, currentFilterMode) + 1;
-            if (nextIndex >= AllFilters.Length)
+            int nextIndex = Array.IndexOf(m_allFilters, currentFilterMode) + 1;
+            if (nextIndex >= m_allFilters.Length)
             {
                 nextIndex = 0;
             }
 
-            return AllFilters[nextIndex];
+            return m_allFilters[nextIndex];
         }
     }
 
     #region Networking
-    public class MessageHandler : MonoBehaviour
-    {
-        private const int m_networkChannelFilteredNets = 72;
 
-        public enum NetworkMessages
+    private static class MessageHandler
+    {
+        private const int FilteredNetsNetworkChannel = 72;
+
+        public enum FilteredNetsMessages
         {
-            FilteredNets_FilterChanged = 10910,
-            FilteredNets_SyncNetFilters = 10911,
-            FilteredNets_SyncNetFiltersRequested = 10912
+            FilterChanged = 10910,
+            SyncNetFilters = 10911,
+            SyncNetFiltersRequested = 10912
         }
 
         public static void SendMessage(Message message)
         {
             if (Semih_Network.IsHost)
             {
-                RAPI.GetLocalPlayer().Network.RPC(message, Target.Other, EP2PSend.k_EP2PSendReliable, (NetworkChannel)m_networkChannelFilteredNets);
+                RAPI.GetLocalPlayer().Network.RPC(message, Target.Other, EP2PSend.k_EP2PSendReliable, (NetworkChannel)FilteredNetsNetworkChannel);
             }
             else
             {
-                RAPI.GetLocalPlayer().SendP2P(message, EP2PSend.k_EP2PSendReliable, (NetworkChannel)m_networkChannelFilteredNets);
+                RAPI.GetLocalPlayer().SendP2P(message, EP2PSend.k_EP2PSendReliable, (NetworkChannel)FilteredNetsNetworkChannel);
             }
         }
 
@@ -427,12 +453,12 @@ public class FilteredNets : Mod
             }
 
             uint num;
-            while (SteamNetworking.IsP2PPacketAvailable(out num, m_networkChannelFilteredNets))
+            while (SteamNetworking.IsP2PPacketAvailable(out num, FilteredNetsNetworkChannel))
             {
                 byte[] array = new byte[num];
                 uint num2;
-                CSteamID cSteamID;
-                if (!SteamNetworking.ReadP2PPacket(array, num, out num2, out cSteamID, m_networkChannelFilteredNets))
+                CSteamID cSteamId;
+                if (!SteamNetworking.ReadP2PPacket(array, num, out num2, out cSteamId, FilteredNetsNetworkChannel))
                 {
                     continue;
                 }
@@ -448,9 +474,9 @@ public class FilteredNets : Mod
                     Messages type = message.Type;
                     switch (type)
                     {
-                        case (Messages)NetworkMessages.FilteredNets_FilterChanged:
+                        case (Messages)FilteredNetsMessages.FilterChanged:
                             {
-                                var filterMessage = message as Message_ItemNetFilterChanged;
+                                var filterMessage = message as MessageItemNetFilterChanged;
                                 if (filterMessage == null)
                                 {
                                     break;
@@ -459,9 +485,9 @@ public class FilteredNets : Mod
                                 SetNetFilter(filterMessage.ObjectIndex, filterMessage.NewFilter);
                                 break;
                             }
-                        case (Messages)NetworkMessages.FilteredNets_SyncNetFilters:
+                        case (Messages)FilteredNetsMessages.SyncNetFilters:
                             {
-                                var syncMessage = message as Message_SyncNetFilters;
+                                var syncMessage = message as MessageSyncNetFilters;
                                 if (syncMessage == null)
                                 {
                                     break;
@@ -469,10 +495,10 @@ public class FilteredNets : Mod
 
                                 ApplyFilters(syncMessage.Mappings);
                                 
-                                RConsole.Log(string.Format("{0}: Synced the item net filters with host...", m_modNamePrefix));
+                                RConsole.Log(string.Format("{0}: Synced the item net filters with host...", ModNamePrefix));
                                 break;
                             }
-                        case (Messages)NetworkMessages.FilteredNets_SyncNetFiltersRequested:
+                        case (Messages)FilteredNetsMessages.SyncNetFiltersRequested:
                             {
                                 if (Semih_Network.IsHost)
                                 {
@@ -505,10 +531,15 @@ public class FilteredNets : Mod
 
             if (packet.PacketType == PacketType.Single)
             {
-                var packet_Single = packet as Packet_Single;
-                return new Message[]
+                var packetSingle = packet as Packet_Single;
+                if (packetSingle == null)
                 {
-                    packet_Single.message
+                    return new Message[0];
+                }
+
+                return new[]
+                {
+                    packetSingle.message
                 };
             }
             
@@ -523,16 +554,16 @@ public class FilteredNets : Mod
     }
 
     [Serializable]
-    public class Message_ItemNetFilterChanged : Message
+    public class MessageItemNetFilterChanged : Message
     {
         public uint ObjectIndex;
         public string NewFilter;
 
-        public Message_ItemNetFilterChanged()
+        public MessageItemNetFilterChanged()
         {
         }
 
-        public Message_ItemNetFilterChanged(Messages type, uint objectIndex, string newFilter) 
+        public MessageItemNetFilterChanged(Messages type, uint objectIndex, string newFilter) 
             : base(type)
         {
             ObjectIndex = objectIndex;
@@ -541,15 +572,15 @@ public class FilteredNets : Mod
     }
 
     [Serializable]
-    public class Message_SyncNetFilters : Message
+    public class MessageSyncNetFilters : Message
     {
         public NetFilterMappings Mappings;
 
-        public Message_SyncNetFilters()
+        public MessageSyncNetFilters()
         {
         }
 
-        public Message_SyncNetFilters(Messages type, NetFilterMappings mappings)
+        public MessageSyncNetFilters(Messages type, NetFilterMappings mappings)
             : base(type)
         {
             Mappings = mappings;
@@ -557,13 +588,13 @@ public class FilteredNets : Mod
     }
     
     [Serializable]
-    public class Message_SyncNetFiltersRequest : Message
+    public class MessageSyncNetFiltersRequest : Message
     {
-        public Message_SyncNetFiltersRequest()
+        public MessageSyncNetFiltersRequest()
         {
         }
 
-        public Message_SyncNetFiltersRequest(Messages type)
+        public MessageSyncNetFiltersRequest(Messages type)
             : base(type)
         {
         }
@@ -574,7 +605,7 @@ public class FilteredNets : Mod
         public override Type BindToType(string assemblyName, string typeName)
         {
             string exeAssembly = Assembly.GetExecutingAssembly().FullName;
-            Type typeToDeserialize = Type.GetType(string.Format("{0}, {1}", typeName, exeAssembly));
+            var typeToDeserialize = Type.GetType(string.Format("{0}, {1}", typeName, exeAssembly));
             return typeToDeserialize;
         }
     }
