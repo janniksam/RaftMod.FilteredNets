@@ -1,49 +1,60 @@
 using Harmony;
+using Steamworks;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Xml.Serialization;
+using JetBrains.Annotations;
 using UnityEngine;
+
+// ReSharper disable once CheckNamespace
 
 [ModTitle("FilteredNets")]
 [ModDescription("Configure your item nets to only catch specific items")]
-[ModAuthor("janniksam")] 
+[ModAuthor("janniksam")]
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
-[ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")] 
-[ModVersion("1.0")] 
-[RaftVersion("Update 11 (4677160)")] 
-[ModIsPermanent(true)] 
+[ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
+[ModVersion("1.2")]
+[RaftVersion("Update 11 (4677160)")]
+[ModIsPermanent(true)]
 public class FilteredNets : Mod
 {
-    private static readonly string m_modNamePrefix = "<color=#42a7f5>Filtered</color><color=#FF0000>Nets</color>";
-    private static readonly string m_configurationPath = Path.Combine(Directory.GetCurrentDirectory(), @"mods\ModData\FilteredNets\");
-    private static readonly string m_configurationFile = "netfilterMapping.xml";
-    private static Dictionary<uint, string> m_netSetup = new Dictionary<uint, string>();
+    private const string HarmonyId = "com.janniksam.raftmods.filterednets";
+    private const string ModNamePrefix = "<color=#42a7f5>Filtered</color><color=#FF0000>Nets</color>";
+    private const string ConfigurationSubPath = @"mods\ModData\FilteredNets\";
+    private const string ConfigurationFile = "netfilterMapping.xml";
 
-    public HarmonyInstance harmony;
-    public readonly string harmonyID = "com.janniksam.raftmods.filterednets";
+    private readonly string m_configurationPath = Path.Combine(Directory.GetCurrentDirectory(), ConfigurationSubPath);
+    private static readonly Dictionary<uint, string> m_netSetup = new Dictionary<uint, string>();
+    private HarmonyInstance m_harmony;
 
+    [UsedImplicitly]
     public void Start()
     {
-        RConsole.Log(string.Format("{0} has been loaded!", m_modNamePrefix));
-        harmony = HarmonyInstance.Create(harmonyID);
-        harmony.PatchAll(Assembly.GetExecutingAssembly());
+        RConsole.Log(string.Format("{0} has been loaded!", ModNamePrefix));
+        m_harmony = HarmonyInstance.Create(HarmonyId);
+        m_harmony.PatchAll(Assembly.GetExecutingAssembly());
     }
 
+    [UsedImplicitly]
     public void OnModUnload()
     {
-        RConsole.Log(string.Format("{0} has been unloaded!", m_modNamePrefix));
-        
-        harmony.UnpatchAll(harmonyID);
+        RConsole.Log(string.Format("{0} has been unloaded!", ModNamePrefix));
+
+        m_harmony.UnpatchAll(HarmonyId);
         Destroy(gameObject);
     }
 
-    //public void Update()
-    //{
-    //}
+    [UsedImplicitly]
+    public void Update()
+    {
+        MessageHandler.ReadP2P_Channel();
+    }
 
     private static void ToggleFilterModeForNet(ItemNet net)
     {
@@ -55,10 +66,18 @@ public class FilteredNets : Mod
 
         string currentFilterMode = m_netSetup[netId];
         string nextFilterMode = NetFilters.Next(currentFilterMode);
-        m_netSetup[netId] = nextFilterMode;
-        RConsole.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", m_modNamePrefix, netId, nextFilterMode));
+        SetNetFilter(netId, nextFilterMode);
+        MessageHandler.SendMessage(
+            new MessageItemNetFilterChanged(
+                (Messages)MessageHandler.FilteredNetsMessages.FilterChanged, netId, nextFilterMode));
     }
-    
+
+    private static void SetNetFilter(uint netId, string nextFilterMode)
+    {
+        m_netSetup[netId] = nextFilterMode;
+        RConsole.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", ModNamePrefix, netId, nextFilterMode));
+    }
+
     private static string GetCurrentFilter(ItemNet net)
     {
         var netId = net.itemCollector.ObjectIndex;
@@ -73,9 +92,14 @@ public class FilteredNets : Mod
     public override void WorldEvent_WorldLoaded()
     {
         base.WorldEvent_WorldLoaded();
-        
-        if(!Semih_Network.IsHost)
+        m_netSetup.Clear();
+
+        if (!Semih_Network.IsHost)
         {
+            // Requesting current filters from host
+            MessageHandler.SendMessage(
+                new MessageSyncNetFiltersRequest(
+                    (Messages)MessageHandler.FilteredNetsMessages.SyncNetFiltersRequested));
             return;
         }
 
@@ -96,22 +120,43 @@ public class FilteredNets : Mod
 
     private void LoadNetFilterMapping()
     {
-        m_netSetup.Clear();
         var mappings = ReadConfigurationFile();
-        if (mappings == null || 
+        ApplyFilters(mappings);
+    }
+
+    private static void ApplyFilters(NetFilterMappings mappings)
+    {
+        if (mappings == null ||
             mappings.Mappings == null)
         {
             return;
         }
 
         uint[] itemNets = FindObjectsOfType<ItemNet>().Select(p => p.itemCollector.ObjectIndex).ToArray();
-        foreach(var mapping in mappings.Mappings)
+        foreach (var mapping in mappings.Mappings)
         {
-            if(itemNets.Contains(mapping.NetId))
+            if (itemNets.Contains(mapping.NetId))
             {
-                m_netSetup.Add(mapping.NetId, mapping.ActiveNetFilter);
+                if (m_netSetup.ContainsKey(mapping.NetId))
+                {
+                    m_netSetup[mapping.NetId] = mapping.ActiveNetFilter;
+                }
+                else
+                {
+                    m_netSetup.Add(mapping.NetId, mapping.ActiveNetFilter);
+                }
             }
         }
+    }
+
+    private static void SyncFiltersWithPlayers()
+    {
+        RConsole.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", ModNamePrefix));
+
+        var mappings = GetCurrentFilterMapping();
+        MessageHandler.SendMessage(
+             new MessageSyncNetFilters(
+                (Messages)MessageHandler.FilteredNetsMessages.SyncNetFilters, mappings));
     }
 
     private NetFilterMappings ReadConfigurationFile()
@@ -125,7 +170,7 @@ public class FilteredNets : Mod
 
         try
         {
-            using (FileStream file = File.OpenRead(currentConfigurationFilePath))
+            using (var file = File.OpenRead(currentConfigurationFilePath))
             {
                 var mappings = reader.Deserialize(file) as NetFilterMappings;
                 if (mappings == null)
@@ -140,7 +185,7 @@ public class FilteredNets : Mod
         }
         catch (IOException ex)
         {
-            RConsole.LogWarning(string.Format("{0}: Cannot read the current configuration. Exception: {1}", m_modNamePrefix, ex));
+            RConsole.LogWarning(string.Format("{0}: Cannot read the current configuration. Exception: {1}", ModNamePrefix, ex));
             return null;
         }
     }
@@ -149,20 +194,20 @@ public class FilteredNets : Mod
     {
         var currentConfigurationFilePath = GetConfigurationFilePath();
         var currentConfigurationFileDirectory = Path.GetDirectoryName(currentConfigurationFilePath);
+        if (currentConfigurationFileDirectory == null)
+        {
+            RConsole.LogError(string.Format("{0}: Cannot determine save-path.", ModNamePrefix));
+            return;
+        }
+
         if (!Directory.Exists(currentConfigurationFileDirectory))
         {
             Directory.CreateDirectory(currentConfigurationFileDirectory);
         }
 
-        var netfilterMapping = new NetFilterMappings(
-            m_netSetup.Select(p => new NetFilterMapping
-            {
-                NetId = p.Key,
-                ActiveNetFilter = p.Value
-            }).ToArray());
-
+        var netfilterMapping = GetCurrentFilterMapping();
         var writer = new XmlSerializer(typeof(NetFilterMappings));
-        using (FileStream file = File.OpenWrite(currentConfigurationFilePath))
+        using (var file = File.OpenWrite(currentConfigurationFilePath))
         {
             writer.Serialize(file, netfilterMapping);
             file.Flush();
@@ -170,9 +215,19 @@ public class FilteredNets : Mod
         }
     }
 
+    private static NetFilterMappings GetCurrentFilterMapping()
+    {
+        return new NetFilterMappings(
+                    m_netSetup.Select(p => new NetFilterMapping
+                    {
+                        NetId = p.Key,
+                        ActiveNetFilter = p.Value
+                    }).ToArray());
+    }
+
     private string GetConfigurationFilePath()
     {
-        return Path.Combine(m_configurationPath, SaveAndLoad.CurrentGameFileName, m_configurationFile);
+        return Path.Combine(m_configurationPath, SaveAndLoad.CurrentGameFileName, ConfigurationFile);
     }
 
     private static bool ShouldBeFilteredOut(PickupItem_Networked item, uint netId)
@@ -183,7 +238,7 @@ public class FilteredNets : Mod
         }
 
         var filter = m_netSetup[netId];
-        if(filter == NetFilters.All)
+        if (filter == NetFilters.All)
         {
             return false;
         }
@@ -199,7 +254,7 @@ public class FilteredNets : Mod
 
     private static string GetItemName(PickupItem_Networked item)
     {
-        if(item.PickupItem.dropper != null)
+        if (item.PickupItem.dropper != null)
         {
             return NetFilters.Barrels;
         }
@@ -211,7 +266,7 @@ public class FilteredNets : Mod
         }
         else
         {
-            foreach (Cost cost in item.PickupItem.yieldHandler.yieldAsset.yieldAssets)
+            foreach (var cost in item.PickupItem.yieldHandler.yieldAsset.yieldAssets)
             {
                 return cost.item.UniqueName;
             }
@@ -221,6 +276,7 @@ public class FilteredNets : Mod
     }
 
     #region Persisting Net Configuration
+    [Serializable]
     public class NetFilterMappings
     {
         public NetFilterMappings()
@@ -235,6 +291,7 @@ public class FilteredNets : Mod
         public NetFilterMapping[] Mappings { get; set; }
     }
 
+    [Serializable]
     public class NetFilterMapping
     {
         public uint NetId { get; set; }
@@ -244,18 +301,25 @@ public class FilteredNets : Mod
     #endregion
 
     #region Harmony Patches
+
     [HarmonyPatch(typeof(ItemCollector)), HarmonyPatch("OnTriggerEnter")]
+    [UsedImplicitly]
     public class ItemCollectorEditPatch
     {
+        [UsedImplicitly]
         private static bool Prefix(
+            // ReSharper disable InconsistentNaming
+            // ReSharper disable SuggestBaseTypeForParameter
             ItemCollector __instance,
             Collider other,
             int ___maxNumberOfItems,
             Collider ___collectorCollider)
+            // ReSharper restore SuggestBaseTypeForParameter
+            // ReSharper restore InconsistentNaming
         {
             if (!___collectorCollider.enabled ||
                 ___maxNumberOfItems != 0 &&
-                __instance.collectedItems.Count >= ___maxNumberOfItems || 
+                __instance.collectedItems.Count >= ___maxNumberOfItems ||
                 !Helper.ObjectIsOnLayer(other.transform.gameObject, __instance.collectMask))
             {
                 //Skip collection
@@ -263,7 +327,7 @@ public class FilteredNets : Mod
             }
 
             var itemNet = __instance.GetComponentInParent<ItemNet>();
-            PickupItem_Networked item = other.transform.GetComponentInParent<PickupItem_Networked>();
+            var item = other.transform.GetComponentInParent<PickupItem_Networked>();
             if (ShouldBeFilteredOut(item, itemNet.itemCollector.ObjectIndex))
             {
                 //Skip collection
@@ -276,12 +340,17 @@ public class FilteredNets : Mod
     }
 
     [HarmonyPatch(typeof(ItemNet)), HarmonyPatch("OnIsRayed")]
+    [UsedImplicitly]
     public class ItemNetEditPatch
     {
-        private static bool Prefix(
+        [UsedImplicitly]
+        private static bool Prefix
+        (
+            // ReSharper disable InconsistentNaming
             ItemNet __instance,
             CanvasHelper ___canvas,
             ref bool ___displayText)
+            // ReSharper restore InconsistentNaming
         {
             // This overrides the original logic. 
             // If the internal logic is changed in the future, this has to change aswell.
@@ -319,17 +388,18 @@ public class FilteredNets : Mod
             return false;
         }
     }
+
     #endregion
 
-    private class NetFilters
+    private static class NetFilters
     {
-        public static string All = "Default";
-        private static string Planks = "Plank";
-        private static string Plastic = "Plastic";
-        private static string Thatches = "Thatch";
-        public static string Barrels = "Barrels";
+        public const string All = "Default";
+        private const string Planks = "Plank";
+        private const string Plastic = "Plastic";
+        private const string Thatches = "Thatch";
+        public const string Barrels = "Barrels";
 
-        private static string[] AllFilters = new string[]
+        private static readonly string[] m_allFilters =
         {
             All,
             Planks,
@@ -340,13 +410,204 @@ public class FilteredNets : Mod
 
         internal static string Next(string currentFilterMode)
         {
-            int nextIndex = Array.IndexOf(AllFilters, currentFilterMode) + 1;
-            if (nextIndex >= AllFilters.Length)
+            int nextIndex = Array.IndexOf(m_allFilters, currentFilterMode) + 1;
+            if (nextIndex >= m_allFilters.Length)
             {
                 nextIndex = 0;
             }
 
-            return AllFilters[nextIndex];
+            return m_allFilters[nextIndex];
         }
     }
+
+    #region Networking
+
+    private static class MessageHandler
+    {
+        private const int FilteredNetsNetworkChannel = 72;
+
+        public enum FilteredNetsMessages
+        {
+            FilterChanged = 10910,
+            SyncNetFilters = 10911,
+            SyncNetFiltersRequested = 10912
+        }
+
+        public static void SendMessage(Message message)
+        {
+            if (Semih_Network.IsHost)
+            {
+                RAPI.GetLocalPlayer().Network.RPC(message, Target.Other, EP2PSend.k_EP2PSendReliable, (NetworkChannel)FilteredNetsNetworkChannel);
+            }
+            else
+            {
+                RAPI.GetLocalPlayer().SendP2P(message, EP2PSend.k_EP2PSendReliable, (NetworkChannel)FilteredNetsNetworkChannel);
+            }
+        }
+
+        public static void ReadP2P_Channel()
+        {
+            if (Semih_Network.InLobbyScene)
+            {
+                return;
+            }
+
+            uint num;
+            while (SteamNetworking.IsP2PPacketAvailable(out num, FilteredNetsNetworkChannel))
+            {
+                byte[] array = new byte[num];
+                uint num2;
+                CSteamID cSteamId;
+                if (!SteamNetworking.ReadP2PPacket(array, num, out num2, out cSteamId, FilteredNetsNetworkChannel))
+                {
+                    continue;
+                }
+
+                var messages = DeserializeMessages(array);
+                foreach (var message in messages)
+                {
+                    if (message == null)
+                    {
+                        continue;
+                    }
+
+                    Messages type = message.Type;
+                    switch (type)
+                    {
+                        case (Messages)FilteredNetsMessages.FilterChanged:
+                            {
+                                var filterMessage = message as MessageItemNetFilterChanged;
+                                if (filterMessage == null)
+                                {
+                                    break;
+                                }
+
+                                SetNetFilter(filterMessage.ObjectIndex, filterMessage.NewFilter);
+                                break;
+                            }
+                        case (Messages)FilteredNetsMessages.SyncNetFilters:
+                            {
+                                var syncMessage = message as MessageSyncNetFilters;
+                                if (syncMessage == null)
+                                {
+                                    break;
+                                }
+
+                                ApplyFilters(syncMessage.Mappings);
+
+                                RConsole.Log(string.Format("{0}: Synced the item net filters with host...", ModNamePrefix));
+                                break;
+                            }
+                        case (Messages)FilteredNetsMessages.SyncNetFiltersRequested:
+                            {
+                                if (Semih_Network.IsHost)
+                                {
+                                    SyncFiltersWithPlayers();
+                                }
+                                break;
+                            }
+                    }
+                }
+            }
+        }
+
+        private static Message[] DeserializeMessages(byte[] array)
+        {
+            Packet packet;
+            using (var ms = new MemoryStream(array))
+            {
+                var bf = new BinaryFormatter
+                {
+                    Binder = new PreMergeToMergedDeserializationBinder()
+                };
+
+                packet = bf.Deserialize(ms) as Packet;
+            }
+
+            if (packet == null)
+            {
+                return new Message[0];
+            }
+
+            if (packet.PacketType == PacketType.Single)
+            {
+                var packetSingle = packet as Packet_Single;
+                if (packetSingle == null)
+                {
+                    return new Message[0];
+                }
+
+                return new[]
+                {
+                    packetSingle.message
+                };
+            }
+
+            var multiplepackages = packet as Packet_Multiple;
+            if (multiplepackages == null)
+            {
+                return new Message[0];
+            }
+
+            return multiplepackages.messages;
+        }
+    }
+
+    [Serializable]
+    public class MessageItemNetFilterChanged : Message
+    {
+        public uint ObjectIndex;
+        public string NewFilter;
+
+        public MessageItemNetFilterChanged()
+        {
+        }
+
+        public MessageItemNetFilterChanged(Messages type, uint objectIndex, string newFilter)
+            : base(type)
+        {
+            ObjectIndex = objectIndex;
+            NewFilter = newFilter;
+        }
+    }
+
+    [Serializable]
+    public class MessageSyncNetFilters : Message
+    {
+        public NetFilterMappings Mappings;
+
+        public MessageSyncNetFilters()
+        {
+        }
+
+        public MessageSyncNetFilters(Messages type, NetFilterMappings mappings)
+            : base(type)
+        {
+            Mappings = mappings;
+        }
+    }
+
+    [Serializable]
+    public class MessageSyncNetFiltersRequest : Message
+    {
+        public MessageSyncNetFiltersRequest()
+        {
+        }
+
+        public MessageSyncNetFiltersRequest(Messages type)
+            : base(type)
+        {
+        }
+    }
+
+    private sealed class PreMergeToMergedDeserializationBinder : SerializationBinder
+    {
+        public override Type BindToType(string assemblyName, string typeName)
+        {
+            string exeAssembly = Assembly.GetExecutingAssembly().FullName;
+            var typeToDeserialize = Type.GetType(string.Format("{0}, {1}", typeName, exeAssembly));
+            return typeToDeserialize;
+        }
+    }
+    #endregion
 }
