@@ -19,7 +19,7 @@ using UnityEngine;
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
-[ModVersion("1.1")]
+[ModVersion("1.2")]
 [RaftVersion("Update 11 (4677160)")]
 [ModIsPermanent(true)]
 public class FilteredNets : Mod
@@ -152,7 +152,7 @@ public class FilteredNets : Mod
     private static void SyncFiltersWithPlayers()
     {
         RConsole.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", ModNamePrefix));
-        
+
         var mappings = GetCurrentFilterMapping();
         MessageHandler.SendMessage(
              new MessageSyncNetFilters(
@@ -170,7 +170,7 @@ public class FilteredNets : Mod
 
         try
         {
-            using (FileStream file = File.OpenRead(currentConfigurationFilePath))
+            using (var file = File.OpenRead(currentConfigurationFilePath))
             {
                 var mappings = reader.Deserialize(file) as NetFilterMappings;
                 if (mappings == null)
@@ -266,7 +266,7 @@ public class FilteredNets : Mod
         }
         else
         {
-            foreach (Cost cost in item.PickupItem.yieldHandler.yieldAsset.yieldAssets)
+            foreach (var cost in item.PickupItem.yieldHandler.yieldAsset.yieldAssets)
             {
                 return cost.item.UniqueName;
             }
@@ -447,9 +447,9 @@ public class FilteredNets : Mod
 
         public static void ReadP2P_Channel()
         {
-            if (Semih_Network.InLobbyScene) 
+            if (Semih_Network.InLobbyScene)
             {
-                return; 
+                return;
             }
 
             uint num;
@@ -464,7 +464,7 @@ public class FilteredNets : Mod
                 }
 
                 var messages = DeserializeMessages(array);
-                foreach(var message in messages)
+                foreach (var message in messages)
                 {
                     if (message == null)
                     {
@@ -494,7 +494,7 @@ public class FilteredNets : Mod
                                 }
 
                                 ApplyFilters(syncMessage.Mappings);
-                                
+
                                 RConsole.Log(string.Format("{0}: Synced the item net filters with host...", ModNamePrefix));
                                 break;
                             }
@@ -523,8 +523,8 @@ public class FilteredNets : Mod
 
                 packet = bf.Deserialize(ms) as Packet;
             }
-            
-            if(packet == null)
+
+            if (packet == null)
             {
                 return new Message[0];
             }
@@ -542,9 +542,9 @@ public class FilteredNets : Mod
                     packetSingle.message
                 };
             }
-            
+
             var multiplepackages = packet as Packet_Multiple;
-            if(multiplepackages == null)
+            if (multiplepackages == null)
             {
                 return new Message[0];
             }
@@ -563,7 +563,7 @@ public class FilteredNets : Mod
         {
         }
 
-        public MessageItemNetFilterChanged(Messages type, uint objectIndex, string newFilter) 
+        public MessageItemNetFilterChanged(Messages type, uint objectIndex, string newFilter)
             : base(type)
         {
             ObjectIndex = objectIndex;
@@ -586,7 +586,7 @@ public class FilteredNets : Mod
             Mappings = mappings;
         }
     }
-    
+
     [Serializable]
     public class MessageSyncNetFiltersRequest : Message
     {
