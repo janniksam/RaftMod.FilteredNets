@@ -22,6 +22,6 @@ This mod currently under development.
 
 ## Changes
 
-### 1.1
+### 1.2
 
 - Multiplayer Support
