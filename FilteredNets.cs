@@ -19,7 +19,7 @@ using UnityEngine;
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
-[ModVersion("1.2")]
+[ModVersion("1.21")]
 [RaftVersion("Update 11 (4677160)")]
 [ModIsPermanent(true)]
 public class FilteredNets : Mod
@@ -327,14 +327,26 @@ public class FilteredNets : Mod
             }
 
             var itemNet = __instance.GetComponentInParent<ItemNet>();
+            if (itemNet == null || 
+                itemNet.itemCollector == null)
+            {
+                // this is not an item net, continue with collection algorithm
+                return true;
+            }
             var item = other.transform.GetComponentInParent<PickupItem_Networked>();
+            if (item == null)
+            {
+                // invalid item, continue with collection algorithm
+                return true;
+            }
+            
             if (ShouldBeFilteredOut(item, itemNet.itemCollector.ObjectIndex))
             {
                 //Skip collection
                 return false;
             }
 
-            // Continue with collection algorhythm
+            // Continue with collection algorithm
             return true;
         }
     }
