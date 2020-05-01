@@ -19,7 +19,7 @@ using UnityEngine;
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
-[ModVersion("1.21")]
+[ModVersion("1.22")]
 [RaftVersion("Update 11 (4677160)")]
 [ModIsPermanent(true)]
 public class FilteredNets : Mod
@@ -32,6 +32,7 @@ public class FilteredNets : Mod
     private readonly string m_configurationPath = Path.Combine(Directory.GetCurrentDirectory(), ConfigurationSubPath);
     private static readonly Dictionary<uint, string> m_netSetup = new Dictionary<uint, string>();
     private HarmonyInstance m_harmony;
+    private bool m_justJoinedAndNotHost;
 
     [UsedImplicitly]
     public void Start()
@@ -53,7 +54,34 @@ public class FilteredNets : Mod
     [UsedImplicitly]
     public void Update()
     {
+        if (Semih_Network.InLobbyScene)
+        {
+            return;
+        }
+
+        if (m_justJoinedAndNotHost)
+        {
+            TryRequestNetConfigurationFromHost();
+        }
+
         MessageHandler.ReadP2P_Channel();
+    }
+
+    private void TryRequestNetConfigurationFromHost()
+    {
+        var player = RAPI.GetLocalPlayer();
+        if (player == null)
+        {
+            return;
+        }
+
+        RConsole.Log(string.Format("{0}: Requesting the current configurations for each net from the host.",
+            ModNamePrefix));
+        MessageHandler.SendMessage(
+            new MessageSyncNetFiltersRequest(
+                (Messages)MessageHandler.FilteredNetsMessages.SyncNetFiltersRequested));
+
+        m_justJoinedAndNotHost = false;
     }
 
     private static void ToggleFilterModeForNet(ItemNet net)
@@ -96,13 +124,11 @@ public class FilteredNets : Mod
 
         if (!Semih_Network.IsHost)
         {
-            // Requesting current filters from host
-            MessageHandler.SendMessage(
-                new MessageSyncNetFiltersRequest(
-                    (Messages)MessageHandler.FilteredNetsMessages.SyncNetFiltersRequested));
+            m_justJoinedAndNotHost = true;
             return;
         }
 
+        m_justJoinedAndNotHost = false;
         LoadNetFilterMapping();
     }
 
@@ -314,8 +340,8 @@ public class FilteredNets : Mod
             Collider other,
             int ___maxNumberOfItems,
             Collider ___collectorCollider)
-            // ReSharper restore SuggestBaseTypeForParameter
-            // ReSharper restore InconsistentNaming
+        // ReSharper restore SuggestBaseTypeForParameter
+        // ReSharper restore InconsistentNaming
         {
             if (!___collectorCollider.enabled ||
                 ___maxNumberOfItems != 0 &&
@@ -327,7 +353,7 @@ public class FilteredNets : Mod
             }
 
             var itemNet = __instance.GetComponentInParent<ItemNet>();
-            if (itemNet == null || 
+            if (itemNet == null ||
                 itemNet.itemCollector == null)
             {
                 // this is not an item net, continue with collection algorithm
@@ -339,7 +365,7 @@ public class FilteredNets : Mod
                 // invalid item, continue with collection algorithm
                 return true;
             }
-            
+
             if (ShouldBeFilteredOut(item, itemNet.itemCollector.ObjectIndex))
             {
                 //Skip collection
@@ -362,7 +388,7 @@ public class FilteredNets : Mod
             ItemNet __instance,
             CanvasHelper ___canvas,
             ref bool ___displayText)
-            // ReSharper restore InconsistentNaming
+        // ReSharper restore InconsistentNaming
         {
             // This overrides the original logic. 
             // If the internal logic is changed in the future, this has to change aswell.

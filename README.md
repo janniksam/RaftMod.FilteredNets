@@ -22,6 +22,14 @@ This mod currently under development.
 
 ## Changes
 
+### 1.22
+
+- In some cases, the GetLocalPlayer was used to early and resulted in an NullReferenceException
+
+### 1.21
+
+- Added a few null-checks
+
 ### 1.2
 
 - Multiplayer Support
