@@ -19,7 +19,7 @@ using UnityEngine;
 [ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
 [ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
-[ModVersion("1.22")]
+[ModVersion("1.23")]
 [RaftVersion("Update 11 (4677160)")]
 [ModIsPermanent(true)]
 public class FilteredNets : Mod
@@ -188,32 +188,12 @@ public class FilteredNets : Mod
     private NetFilterMappings ReadConfigurationFile()
     {
         string currentConfigurationFilePath = GetConfigurationFilePath();
-        var reader = new XmlSerializer(typeof(NetFilterMappings));
         if (!File.Exists(currentConfigurationFilePath))
         {
             return null;
         }
 
-        try
-        {
-            using (var file = File.OpenRead(currentConfigurationFilePath))
-            {
-                var mappings = reader.Deserialize(file) as NetFilterMappings;
-                if (mappings == null)
-                {
-                    return null;
-                }
-                file.Flush();
-                file.Close();
-
-                return mappings;
-            }
-        }
-        catch (IOException ex)
-        {
-            RConsole.LogWarning(string.Format("{0}: Cannot read the current configuration. Exception: {1}", ModNamePrefix, ex));
-            return null;
-        }
+        return ReadFile<NetFilterMappings>(currentConfigurationFilePath);
     }
 
     private void SaveNetFilterMapping()
@@ -232,12 +212,39 @@ public class FilteredNets : Mod
         }
 
         var netfilterMapping = GetCurrentFilterMapping();
-        var writer = new XmlSerializer(typeof(NetFilterMappings));
-        using (var file = File.OpenWrite(currentConfigurationFilePath))
+        WriteFile(netfilterMapping, currentConfigurationFilePath);
+    }
+
+    private static T ReadFile<T>(string filePath) where T : class
+    {
+        try
         {
-            writer.Serialize(file, netfilterMapping);
-            file.Flush();
-            file.Close();
+            var serializer = new XmlSerializer(typeof(T));
+            using (var reader = new StreamReader(filePath))
+            {
+                return (T) serializer.Deserialize(reader);
+            }
+        }
+        catch (Exception ex)
+        {
+            RConsole.LogError(string.Format("{0}: Could not read file. Exception: {1}.", ModNamePrefix, ex));
+            return null;
+        }
+    }
+
+    private static void WriteFile<T>(T serializableObject, string path) where T : class
+    {
+        try
+        {
+            var serializer = new XmlSerializer(typeof(T));
+            using (var writer = new StreamWriter(path))
+            {
+                serializer.Serialize(writer, serializableObject);
+            }
+        }
+        catch (Exception ex)
+        {
+            RConsole.LogError(string.Format("{0}: Could not write file. Exception: {1}.", ModNamePrefix, ex));
         }
     }
 
