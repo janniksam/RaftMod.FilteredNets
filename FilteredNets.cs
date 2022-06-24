@@ -1,4 +1,4 @@
-using Harmony;
+using HarmonyLib;
 using Steamworks;
 using System;
 using System.Collections.Generic;
@@ -11,41 +11,30 @@ using System.Xml.Serialization;
 using JetBrains.Annotations;
 using UnityEngine;
 
-// ReSharper disable once CheckNamespace
-
-[ModTitle("FilteredNets")]
-[ModDescription("Configure your item nets to only catch specific items")]
-[ModAuthor("janniksam")]
-[ModIconUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
-[ModWallpaperUrl("https://raw.githubusercontent.com/janniksam/Raft.FilteredNets/master/banner.png")]
-[ModVersionCheckUrl("https://www.raftmodding.com/api/v1/mods/filterednets/version.txt")]
-[ModVersion("1.23")]
-[RaftVersion("Update 11 (4677160)")]
-[ModIsPermanent(true)]
 public class FilteredNets : Mod
 {
     private const string HarmonyId = "com.janniksam.raftmods.filterednets";
     private const string ModNamePrefix = "<color=#42a7f5>Filtered</color><color=#FF0000>Nets</color>";
-    private const string ConfigurationSubPath = @"mods\ModData\FilteredNets\";
+    private const string ConfigurationSubPath = @"mods\FilteredNets\";
     private const string ConfigurationFile = "netfilterMapping.xml";
 
     private readonly string m_configurationPath = Path.Combine(Directory.GetCurrentDirectory(), ConfigurationSubPath);
     private static readonly Dictionary<uint, string> m_netSetup = new Dictionary<uint, string>();
-    private HarmonyInstance m_harmony;
+    private Harmony m_harmony;
     private bool m_justJoinedAndNotHost;
 
     [UsedImplicitly]
     public void Start()
     {
-        RConsole.Log(string.Format("{0} has been loaded!", ModNamePrefix));
-        m_harmony = HarmonyInstance.Create(HarmonyId);
+        Debug.Log(string.Format("{0} has been loaded!", ModNamePrefix));
+        m_harmony = new Harmony(HarmonyId);
         m_harmony.PatchAll(Assembly.GetExecutingAssembly());
     }
 
     [UsedImplicitly]
     public void OnModUnload()
     {
-        RConsole.Log(string.Format("{0} has been unloaded!", ModNamePrefix));
+        Debug.Log(string.Format("{0} has been unloaded!", ModNamePrefix));
 
         m_harmony.UnpatchAll(HarmonyId);
         Destroy(gameObject);
@@ -75,7 +64,7 @@ public class FilteredNets : Mod
             return;
         }
 
-        RConsole.Log(string.Format("{0}: Requesting the current configurations for each net from the host.",
+        Debug.Log(string.Format("{0}: Requesting the current configurations for each net from the host.",
             ModNamePrefix));
         MessageHandler.SendMessage(
             new MessageSyncNetFiltersRequest(
@@ -103,7 +92,7 @@ public class FilteredNets : Mod
     private static void SetNetFilter(uint netId, string nextFilterMode)
     {
         m_netSetup[netId] = nextFilterMode;
-        RConsole.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", ModNamePrefix, netId, nextFilterMode));
+        Debug.Log(string.Format("{0}: Filtermode of net {1} was set to {2}", ModNamePrefix, netId, nextFilterMode));
     }
 
     private static string GetCurrentFilter(ItemNet net)
@@ -177,7 +166,7 @@ public class FilteredNets : Mod
 
     private static void SyncFiltersWithPlayers()
     {
-        RConsole.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", ModNamePrefix));
+        Debug.Log(string.Format("{0}: Sync was requested. Syncing filters with players...", ModNamePrefix));
 
         var mappings = GetCurrentFilterMapping();
         MessageHandler.SendMessage(
@@ -202,7 +191,7 @@ public class FilteredNets : Mod
         var currentConfigurationFileDirectory = Path.GetDirectoryName(currentConfigurationFilePath);
         if (currentConfigurationFileDirectory == null)
         {
-            RConsole.LogError(string.Format("{0}: Cannot determine save-path.", ModNamePrefix));
+            Debug.LogError(string.Format("{0}: Cannot determine save-path.", ModNamePrefix));
             return;
         }
 
@@ -222,12 +211,12 @@ public class FilteredNets : Mod
             var serializer = new XmlSerializer(typeof(T));
             using (var reader = new StreamReader(filePath))
             {
-                return (T) serializer.Deserialize(reader);
+                return (T)serializer.Deserialize(reader);
             }
         }
         catch (Exception ex)
         {
-            RConsole.LogError(string.Format("{0}: Could not read file. Exception: {1}.", ModNamePrefix, ex));
+            Debug.LogError(string.Format("{0}: Could not read file. Exception: {1}.", ModNamePrefix, ex));
             return null;
         }
     }
@@ -244,7 +233,7 @@ public class FilteredNets : Mod
         }
         catch (Exception ex)
         {
-            RConsole.LogError(string.Format("{0}: Could not write file. Exception: {1}.", ModNamePrefix, ex));
+            Debug.LogError(string.Format("{0}: Could not write file. Exception: {1}.", ModNamePrefix, ex));
         }
     }
 
@@ -540,7 +529,7 @@ public class FilteredNets : Mod
 
                                 ApplyFilters(syncMessage.Mappings);
 
-                                RConsole.Log(string.Format("{0}: Synced the item net filters with host...", ModNamePrefix));
+                                Debug.Log(string.Format("{0}: Synced the item net filters with host...", ModNamePrefix));
                                 break;
                             }
                         case (Messages)FilteredNetsMessages.SyncNetFiltersRequested:

@@ -22,6 +22,10 @@ This mod currently under development.
 
 ## Changes
 
+### 1.31
+
+- Breaking Api Changes
+
 ### 1.23
 
 - In some cases, the configuration file was corrupted due to bad file handling.
