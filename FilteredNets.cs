@@ -54,7 +54,7 @@ public class FilteredNets : Mod
     [UsedImplicitly]
     public void Update()
     {
-        if (Semih_Network.InLobbyScene)
+        if (Semih_Network.InMenuScene)
         {
             return;
         }
@@ -492,7 +492,7 @@ public class FilteredNets : Mod
 
         public static void ReadP2P_Channel()
         {
-            if (Semih_Network.InLobbyScene)
+            if (Semih_Network.InMenuScene)
             {
                 return;
             }
